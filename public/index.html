@@ -1,9 +1,10 @@
 <!doctype html>
-<html lang="en">
+<html>
   <head>
     <meta charset="utf-8" />
     <title>Wallet Score</title>
     <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
       :root {
         --bg: #0f1724;
@@ -91,21 +92,18 @@
         vertical-align: middle;
       }
       @keyframes spin {
-        0% {
-          transform: rotate(0deg);
-        }
-        100% {
-          transform: rotate(360deg);
-        }
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+      canvas {
+        margin-top: 20px;
+        max-height: 300px;
       }
       @media (max-width: 640px) {
-        .row {
-          flex-direction: column;
-        }
+        .row { flex-direction: column; }
       }
     </style>
   </head>
-
   <body>
     <div class="card">
       <h1>Wallet Score</h1>
@@ -124,28 +122,28 @@
       </div>
 
       <div id="status" class="result" style="display: none"></div>
+      <canvas id="chart" style="display: none;"></canvas>
       <div id="raw" style="margin-top: 12px"></div>
     </div>
 
-    <!-- ✅ Script placed after all HTML so DOM elements exist -->
     <script>
       const scanBtn = document.getElementById("scanBtn");
       const addressEl = document.getElementById("address");
       const chainEl = document.getElementById("chain");
       const status = document.getElementById("status");
       const raw = document.getElementById("raw");
+      const chartEl = document.getElementById("chart");
+      let chart; // global chart instance
 
       scanBtn.onclick = async () => {
         const address = addressEl.value.trim();
         const chain = chainEl.value;
-        if (!address) {
-          alert("Enter an address");
-          return;
-        }
+        if (!address) return alert("Enter an address");
 
         status.style.display = "block";
         status.innerHTML = '<span class="spinner"></span> Scanning…';
         raw.innerHTML = "";
+        chartEl.style.display = "none";
 
         try {
           const r = await fetch("/api/scan", {
@@ -155,18 +153,72 @@
           });
 
           const j = await r.json();
-
           if (!r.ok) {
-            status.innerHTML =
-              "Error: " + (j.error || JSON.stringify(j));
+            status.innerHTML = "Error: " + (j.error || JSON.stringify(j));
             return;
           }
 
-          status.innerHTML = `<strong>Score: ${j.score}/100</strong> · <span class="label">${j.labels.join(
-            ", "
-          )}</span>`;
-          raw.innerHTML =
-            "<pre>" + JSON.stringify(j.details, null, 2) + "</pre>";
+          status.innerHTML = `
+            <strong>Score: ${j.score.toFixed(2)}/100</strong> 
+            · <span class="label">${j.labels.join(", ")}</span>
+          `;
+
+          // Display raw details
+          raw.innerHTML = "<pre>" + JSON.stringify(j.details, null, 2) + "</pre>";
+
+          // Generate live chart
+          if (j.labels.includes("EVM") && j.details.items) {
+            const tokens = j.details.items
+              .filter((t) => t.balance > 0)
+              .slice(0, 5);
+            const labels = tokens.map((t) => t.contract_ticker_symbol || "Token");
+            const data = tokens.map((t) => Number(t.balance) / 1e18);
+
+            if (chart) chart.destroy();
+            chart = new Chart(chartEl, {
+              type: "doughnut",
+              data: {
+                labels,
+                datasets: [
+                  {
+                    data,
+                    backgroundColor: ["#06b6d4", "#fbbf24", "#22c55e", "#ef4444", "#8b5cf6"],
+                  },
+                ],
+              },
+              options: {
+                plugins: {
+                  legend: { labels: { color: "#e6eef8" } },
+                },
+              },
+            });
+            chartEl.style.display = "block";
+          } else if (j.labels.includes("Solana")) {
+            if (chart) chart.destroy();
+            chart = new Chart(chartEl, {
+              type: "bar",
+              data: {
+                labels: ["Balance"],
+                datasets: [
+                  {
+                    label: "SOL",
+                    data: [j.details.balance || 0],
+                    backgroundColor: "#06b6d4",
+                  },
+                ],
+              },
+              options: {
+                scales: {
+                  x: { ticks: { color: "#e6eef8" } },
+                  y: { ticks: { color: "#e6eef8" } },
+                },
+                plugins: {
+                  legend: { labels: { color: "#e6eef8" } },
+                },
+              },
+            });
+            chartEl.style.display = "block";
+          }
         } catch (e) {
           status.innerHTML = "Network error: " + e.message;
         }
