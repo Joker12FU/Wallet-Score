@@ -10,10 +10,51 @@ app.use(express.static("public"));
 
 // API POST route
 app.post("/api/scan", async (req, res) => {
-  try {
-    const { address, chain } = req.body;
+  const { address, chain } = req.body;
 
-    if (!address || !chain) return res.status(400).json({ error: "Missing address or chain" });
+  if (!address || !chain) {
+    return res.status(400).json({ error: "Address and chain are required" });
+  }
+
+  // Basic chain-specific validation
+  const isEvm = /^0x[a-fA-F0-9]{40}$/.test(address);
+  const isSolana = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address);
+
+  if (chain === "ethereum" && !isEvm) {
+    return res.status(400).json({ error: "Invalid EVM address format" });
+  }
+  if (chain === "solana" && !isSolana) {
+    return res.status(400).json({ error: "Invalid Solana address format" });
+  }
+
+  try {
+    // ✅ Call live data API based on chain
+    let details, score, labels;
+
+    if (chain === "ethereum") {
+      // Example: Etherscan or Covalent API
+      const resp = await fetch(
+        `https://api.covalenthq.com/v1/eth-mainnet/address/${address}/balances_v2/?key=${process.env.COVALENT_API_KEY}`
+      );
+      const data = await resp.json();
+      details = data.data || {};
+      score = Math.min(100, (details.items?.length || 0) * 5);
+      labels = ["EVM"];
+    } else {
+      // Example: SolanaFM or Helius
+      const resp = await fetch(`https://api.helius.xyz/v0/addresses/${address}?api-key=${process.env.HELIUS_API_KEY}`);
+      const data = await resp.json();
+      details = data || {};
+      score = Math.min(100, (details.balance || 0) / 1000000);
+      labels = ["Solana"];
+    }
+
+    res.json({ score, labels, details });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch live data" });
+  }
+});
 
     let result;
 
@@ -49,4 +90,8 @@ app.post("/api/scan", async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
+
+console.log("Covalent API Key:", process.env.COVALENT_API_KEY ? "Loaded ✅" : "Missing ❌");
+console.log("Helius API Key:", process.env.HELIUS_API_KEY ? "Loaded ✅" : "Missing ❌");
+
 app.listen(PORT, () => console.log(`Wallet Score server running on port ${PORT}`));
